@@ -3,34 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js Koeputket</title>
+    <title>Three.js Saostumisreaktiot</title>
     <style>
         body { margin: 0; background-color: #f0f0f0; overflow: hidden; font-family: sans-serif; }
         canvas { display: block; }
-        #controls {
+        /* MUUTOS: Kaksi erillistä säiliötä ylä- ja alareunaan */
+        #instructions-container {
             position: absolute;
             top: 10px;
-            left: 10px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            pointer-events: none;
+        }
+        #controls-container {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        #controls {
             padding: 10px;
             background: rgba(255, 255, 255, 0.8);
             border-radius: 5px;
             display: flex;
             align-items: center;
         }
-        label { margin-right: 5px; }
         button { margin-left: 10px; }
+        #instructions {
+            font-size: 16px;
+            color: #333;
+            background: rgba(255, 255, 255, 0.8);
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
-    <!-- Valikko ja nappi -->
-    <div id="controls">
-        <label for="reagent-select">Valitse reagenssi:</label>
-        <select id="reagent-select">
-            <option value="ammonia">Ammoniakki</option>
-            <option value="naoh">Natriumhydroksidi</option>
-            <option value="ki">Kaliumjodidi</option>
-        </select>
-        <button id="reset-button">Aloita alusta</button>
+    <!-- MUUTOS: Ohjeet omassa säiliössään ylhäällä -->
+    <div id="instructions-container">
+        <div id="instructions">
+            <p>Mitä ioneja koeputket sisältävät? Valitse lisättävä kemikaali ja klikkaa koeputkea.</p>
+        </div>
+    </div>
+
+    <!-- MUUTOS: Valikot omassa säiliössään alhaalla -->
+    <div id="controls-container">
+        <div id="controls">
+            <label for="reagent-select">Valitse reagenssi:</label>
+            <select id="reagent-select">
+                <option value="ammonia">Ammoniakki</option>
+                <option value="naoh">Natriumhydroksidi</option>
+                <option value="ki">Kaliumjodidi</option>
+            </select>
+            <button id="reset-button">Aloita alusta</button>
+        </div>
     </div>
 
     <!-- Import map for Three.js and its addons -->
@@ -53,7 +81,7 @@
         // 1. Basic Setup
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 2, 9); // Siirretään kameraa hieman taaksepäin
+        camera.position.set(0, 2, 8);
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
@@ -82,13 +110,13 @@
         const copperSulfateMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0x6495ED });
         const ironIISulfateMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0x98FB98 });
         const leadNitrateMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0xffffff });
-        const ironIIISulfateMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0xD2B48C }); // Vaaleanruskea
+        const ironIIISulfateMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0xD2B48C });
         
         const copperAmmoniumMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0x483D8B, thickness: 0.8, transmission: 0.8 });
         const copperHydroxideParticleMaterial = new THREE.MeshPhysicalMaterial({ color: 0x40E0D0, roughness: 0.9, transparent: false });
         const ironIIHydroxideMaterial = new THREE.MeshPhysicalMaterial({ color: 0x556B2F, roughness: 0.9, transparent: false });
         const leadIodideMaterial = new THREE.MeshPhysicalMaterial({ color: 0xFFD700, roughness: 0.9, transparent: false });
-        const ironIIIHydroxideMaterial = new THREE.MeshPhysicalMaterial({ color: 0x8B4513, roughness: 0.9, transparent: false }); // Ruskea sakka
+        const ironIIIHydroxideMaterial = new THREE.MeshPhysicalMaterial({ color: 0x8B4513, roughness: 0.9, transparent: false });
 
         // 4. Global variables
         const raycaster = new THREE.Raycaster();
@@ -146,11 +174,10 @@
         }
 
         // 6. Create initial tubes
-        const tubeSpacing = 2.0;
-        createTestTube(new THREE.Vector3(-tubeSpacing * 1.5, 1.5, 0), copperSulfateMaterial, 0.25, 'copperSulfate');
-        createTestTube(new THREE.Vector3(-tubeSpacing * 0.5, 1.5, 0), ironIISulfateMaterial, 0.25, 'ironIISulfate');
-        createTestTube(new THREE.Vector3(tubeSpacing * 0.5, 1.5, 0), leadNitrateMaterial, 0.25, 'leadNitrate');
-        createTestTube(new THREE.Vector3(tubeSpacing * 1.5, 1.5, 0), ironIIISulfateMaterial, 0.25, 'ironIIISulfate');
+        createTestTube(new THREE.Vector3(-2.25, 1.5, 0), copperSulfateMaterial, 0.25, 'copperSulfate');
+        createTestTube(new THREE.Vector3(-0.75, 1.5, 0), ironIISulfateMaterial, 0.25, 'ironIISulfate');
+        createTestTube(new THREE.Vector3(0.75, 1.5, 0), leadNitrateMaterial, 0.25, 'leadNitrate');
+        createTestTube(new THREE.Vector3(2.25, 1.5, 0), ironIIISulfateMaterial, 0.25, 'ironIIISulfate');
 
         // 7. Interactivity & Reaction Logic
         function addDrop(tubeData) {
@@ -196,7 +223,6 @@
 
         function triggerReaction(tubeData) {
             tubeData.dropCount++;
-            // Kuparisulfaatti
             if (tubeData.id === 'copperSulfate') {
                 if (selectedReagent === 'ammonia' && tubeData.dropCount === 1) {
                     createParticles(tubeData, copperHydroxideParticleMaterial, 200);
@@ -209,15 +235,12 @@
                     createParticles(tubeData, copperHydroxideParticleMaterial, 200);
                 }
             }
-            // Rauta(II)sulfaatti
             if (tubeData.id === 'ironIISulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
                 createParticles(tubeData, ironIIHydroxideMaterial, 200);
             }
-            // Lyijynitraatti
             if (tubeData.id === 'leadNitrate' && selectedReagent === 'ki') {
                 createParticles(tubeData, leadIodideMaterial, 200);
             }
-            // Rauta(III)sulfaatti
             if (tubeData.id === 'ironIIISulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
                 createParticles(tubeData, ironIIIHydroxideMaterial, 200);
             }
