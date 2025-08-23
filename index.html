@@ -7,7 +7,6 @@
     <style>
         body { margin: 0; background-color: #f0f0f0; overflow: hidden; font-family: sans-serif; }
         canvas { display: block; }
-        /* MUUTOS: Kaksi erillistä säiliötä ylä- ja alareunaan */
         #instructions-container {
             position: absolute;
             top: 10px;
@@ -41,14 +40,12 @@
     </style>
 </head>
 <body>
-    <!-- MUUTOS: Ohjeet omassa säiliössään ylhäällä -->
     <div id="instructions-container">
         <div id="instructions">
             <p>Mitä ioneja koeputket sisältävät? Valitse lisättävä kemikaali ja klikkaa koeputkea.</p>
         </div>
     </div>
 
-    <!-- MUUTOS: Valikot omassa säiliössään alhaalla -->
     <div id="controls-container">
         <div id="controls">
             <label for="reagent-select">Valitse reagenssi:</label>
@@ -61,7 +58,6 @@
         </div>
     </div>
 
-    <!-- Import map for Three.js and its addons -->
     <script type="importmap">
         {
             "imports": {
@@ -113,10 +109,11 @@
         const ironIIISulfateMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0xD2B48C });
         
         const copperAmmoniumMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0x483D8B, thickness: 0.8, transmission: 0.8 });
-        const copperHydroxideParticleMaterial = new THREE.MeshPhysicalMaterial({ color: 0x40E0D0, roughness: 0.9, transparent: false });
+        const copperHydroxideMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0x40E0D0, roughness: 0.8, transmission: 0.5 });
         const ironIIHydroxideMaterial = new THREE.MeshPhysicalMaterial({ color: 0x556B2F, roughness: 0.9, transparent: false });
         const leadIodideMaterial = new THREE.MeshPhysicalMaterial({ color: 0xFFD700, roughness: 0.9, transparent: false });
         const ironIIIHydroxideMaterial = new THREE.MeshPhysicalMaterial({ color: 0x8B4513, roughness: 0.9, transparent: false });
+        const leadHydroxideMaterial = new THREE.MeshPhysicalMaterial({ color: 0xf5f5f5, roughness: 0.9, transparent: false });
 
         // 4. Global variables
         const raycaster = new THREE.Raycaster();
@@ -167,7 +164,8 @@
                 id: id, group: group, liquidMesh: liquidMesh, dropCount: 0, 
                 liquidRadius: radius - wallThickness,
                 originalMaterial: liquidMaterial.clone(),
-                sedimentLevel: group.position.y
+                sedimentLevel: group.position.y,
+                complexLayer: null
             };
             clickableObjects.push(glassMesh);
             return group;
@@ -180,6 +178,7 @@
         createTestTube(new THREE.Vector3(2.25, 1.5, 0), ironIIISulfateMaterial, 0.25, 'ironIIISulfate');
 
         // 7. Interactivity & Reaction Logic
+        // KORJAUS: Palautettu addDrop-funktion sisältö.
         function addDrop(tubeData) {
             const dropGeometry = new THREE.SphereGeometry(0.1, 16, 8);
             const drop = new THREE.Mesh(dropGeometry, new THREE.MeshPhysicalMaterial({color: 0xffffff, transmission: 0.5, transparent: true}));
@@ -190,7 +189,8 @@
             drops.push(drop);
             scene.add(drop);
         }
-
+        
+        // KORJAUS: Palautettu createParticles-funktion sisältö.
         function createParticles(tubeData, material, count) {
             if (tubeData.particlesCreated) return;
             tubeData.particlesCreated = true;
@@ -224,13 +224,21 @@
         function triggerReaction(tubeData) {
             tubeData.dropCount++;
             if (tubeData.id === 'copperSulfate') {
-                if (selectedReagent === 'ammonia' && tubeData.dropCount === 1) {
-                    createParticles(tubeData, copperHydroxideParticleMaterial, 200);
-                } else if (selectedReagent === 'ammonia' && tubeData.dropCount === 2) {
-                    particles.forEach(p => { if (p.userData.tubeData.id === 'copperSulfate') scene.remove(p); });
-                    particles = particles.filter(p => p.userData.tubeData.id !== 'copperSulfate');
-                    reactions = reactions.filter(r => r.mesh !== tubeData.liquidMesh);
-                    tubeData.liquidMesh.material = copperAmmoniumMaterial;
+                if (selectedReagent === 'ammonia') {
+                    if (tubeData.dropCount === 1) {
+                        tubeData.liquidMesh.material = copperHydroxideMaterial;
+                        const complexLayerGeom = new THREE.CylinderGeometry(tubeData.liquidRadius, tubeData.liquidRadius, 0.1, 32);
+                        const complexLayer = new THREE.Mesh(complexLayerGeom, copperAmmoniumMaterial);
+                        const surfaceY = tubeData.liquidMesh.geometry.boundingBox.max.y;
+                        complexLayer.position.y = surfaceY - 0.05;
+                        complexLayer.renderOrder = 1;
+                        tubeData.group.add(complexLayer);
+                        tubeData.complexLayer = complexLayer;
+                    } else if (tubeData.dropCount >= 2) {
+                        if (tubeData.complexLayer) tubeData.group.remove(tubeData.complexLayer);
+                        tubeData.complexLayer = null;
+                        tubeData.liquidMesh.material = copperAmmoniumMaterial;
+                    }
                 } else if (selectedReagent === 'naoh') {
                     createParticles(tubeData, copperHydroxideParticleMaterial, 200);
                 }
@@ -238,8 +246,13 @@
             if (tubeData.id === 'ironIISulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
                 createParticles(tubeData, ironIIHydroxideMaterial, 200);
             }
-            if (tubeData.id === 'leadNitrate' && selectedReagent === 'ki') {
-                createParticles(tubeData, leadIodideMaterial, 200);
+            if (tubeData.id === 'leadNitrate') {
+                if (selectedReagent === 'ki') {
+                    createParticles(tubeData, leadIodideMaterial, 200);
+                }
+                if (selectedReagent === 'naoh') {
+                    createParticles(tubeData, leadHydroxideMaterial, 200);
+                }
             }
             if (tubeData.id === 'ironIIISulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
                 createParticles(tubeData, ironIIIHydroxideMaterial, 200);
@@ -257,11 +270,16 @@
                 const tubeData = glassMesh.userData;
                 tubeData.dropCount = 0;
                 tubeData.particlesCreated = false;
+                if (tubeData.complexLayer) {
+                    tubeData.group.remove(tubeData.complexLayer);
+                    tubeData.complexLayer = null;
+                }
                 tubeData.liquidMesh.material = tubeData.originalMaterial.clone();
                 tubeData.sedimentLevel = tubeData.group.position.y;
             });
         }
-
+        
+        // KORJAUS: Palautettu klikkauskuuntelijan sisältö.
         window.addEventListener('click', (event) => {
             const rect = renderer.domElement.getBoundingClientRect();
             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -328,4 +346,6 @@
     </script>
 </body>
 </html>
+
+
 
