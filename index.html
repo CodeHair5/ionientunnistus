@@ -136,8 +136,8 @@
             glassMesh.userData = { 
                 id: id, group: group, liquidMesh: liquidMesh, dropCount: 0, 
                 liquidRadius: radius - wallThickness,
-                originalMaterial: liquidMaterial,
-                // MUUTOS: sedimentLevel alkaa nyt putken pohjalta
+                // MUUTOS: Tallennetaan puhdas kopio alkuperäisestä materiaalista.
+                originalMaterial: liquidMaterial.clone(),
                 sedimentLevel: group.position.y
             };
             clickableObjects.push(glassMesh);
@@ -162,7 +162,6 @@
         }
 
         function createParticles(tubeData, material, count) {
-            // MUUTOS: Partikkeliefekti tapahtuu vain kerran
             if (tubeData.particlesCreated) return;
             tubeData.particlesCreated = true;
 
@@ -189,14 +188,13 @@
                 startColor: new THREE.Color(tubeData.liquidMesh.material.color.getHex()),
                 endColor: new THREE.Color(material.color.getHex()),
                 startTransmission: tubeData.liquidMesh.material.transmission,
-                endTransmission: 0.0, // Täysin läpinäkymätön
+                endTransmission: 0.0,
                 progress: 0
             });
         }
 
         function triggerReaction(tubeData) {
             tubeData.dropCount++;
-            // Kuparisulfaatti + Ammoniakki
             if (tubeData.id === 'copperSulfate' && selectedReagent === 'ammonia') {
                 if (tubeData.dropCount === 1) {
                     createParticles(tubeData, copperHydroxideParticleMaterial, 200);
@@ -206,15 +204,12 @@
                     tubeData.liquidMesh.material = copperAmmoniumMaterial;
                 }
             }
-             // Kuparisulfaatti + NaOH
             if (tubeData.id === 'copperSulfate' && selectedReagent === 'naoh') {
                 createParticles(tubeData, copperHydroxideParticleMaterial, 200);
             }
-            // Rautasulfaatti + NaOH tai Ammoniakki
             if (tubeData.id === 'ironSulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
                 createParticles(tubeData, ironHydroxideMaterial, 200);
             }
-            // Lyijynitraatti + Kaliumjodidi
             if (tubeData.id === 'leadNitrate' && selectedReagent === 'ki') {
                 createParticles(tubeData, leadIodideMaterial, 200);
             }
@@ -231,7 +226,8 @@
                 const tubeData = glassMesh.userData;
                 tubeData.dropCount = 0;
                 tubeData.particlesCreated = false;
-                tubeData.liquidMesh.material = tubeData.originalMaterial;
+                // MUUTOS: Palautetaan puhtaasta kopiosta, jotta nollaus toimii aina.
+                tubeData.liquidMesh.material = tubeData.originalMaterial.clone();
                 tubeData.sedimentLevel = tubeData.group.position.y;
             });
         }
@@ -272,14 +268,13 @@
                     particle.position.y -= particle.userData.velocityY;
                 } else if (!isInsideBottom) {
                     particle.position.y = targetY;
-                    tubeData.sedimentLevel += 0.0015; // Kasvatetaan saostuman tasoa
+                    tubeData.sedimentLevel += 0.0015;
                 }
             }
             
             for (let i = reactions.length - 1; i >= 0; i--) {
                 const reaction = reactions[i];
                 if (reaction.type === 'precipitate' && reaction.progress < 1) {
-                    // Neste muuttuu nopeammin
                     reaction.progress += 0.02; 
                     reaction.mesh.material.color.lerpColors(reaction.startColor, reaction.endColor, reaction.progress);
                     reaction.mesh.material.transmission = THREE.MathUtils.lerp(reaction.startTransmission, reaction.endTransmission, reaction.progress);
