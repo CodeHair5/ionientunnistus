@@ -1,156 +1,304 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js Koeputket</title>
+    <style>
+        body { margin: 0; background-color: #f0f0f0; overflow: hidden; font-family: sans-serif; }
+        canvas { display: block; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+        }
+        label { margin-right: 5px; }
+        button { margin-left: 10px; }
+    </style>
+</head>
+<body>
+    <!-- Valikko ja nappi -->
+    <div id="controls">
+        <label for="reagent-select">Valitse reagenssi:</label>
+        <select id="reagent-select">
+            <option value="ammonia">Ammoniakki</option>
+            <option value="naoh">Natriumhydroksidi</option>
+            <option value="ki">Kaliumjodidi</option>
+        </select>
+        <button id="reset-button">Aloita alusta</button>
+    </div>
 
-// 1. Perusasetukset (Scene, Camera, Renderer)
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 1.5, 6);
+    <!-- Import map for Three.js and its addons -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.toneMapping = THREE.ACESFilmicToneMapping; // Realistisempi valaistus
-document.body.appendChild(renderer.domElement);
+    <!-- Main application script -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+        import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 1, 0);
-controls.update();
-
-// 2. Valaistus (HDRI-ympäristö antaa parhaat heijastukset lasille)
-const rgbeLoader = new RGBELoader();
-rgbeLoader.load('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_03_1k.hdr', (texture) => {
-    texture.mapping = THREE.EquirectangularReflectionMapping;
-    scene.environment = texture;
-    scene.background = new THREE.Color(0xdddddd); // Vaaleanharmaa tausta
-});
-
-// 3. Materiaalit
-// Luodaan realistinen lasimateriaali
-const glassMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff,
-    metalness: 0.1,
-    roughness: 0.05,
-    ior: 1.5, // Valon taitokerroin (lasille tyypillinen)
-    transmission: 1.0, // Täysin läpinäkyvä
-    thickness: 1.5,
-    transparent: true,
-});
-
-// Luodaan nestemateriaalit
-const copperSulfateMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x6495ED, // Sinertävä
-    metalness: 0,
-    roughness: 0.1,
-    ior: 1.33,
-    transmission: 1.0,
-    thickness: 2.0,
-    transparent: true,
-});
-
-const ironSulfateMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x98FB98, // Vihertävä
-    metalness: 0,
-    roughness: 0.1,
-    ior: 1.33,
-    transmission: 1.0,
-    thickness: 2.0,
-    transparent: true,
-});
-
-const leadNitrateMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff, // Väritön
-    metalness: 0,
-    roughness: 0.1,
-    ior: 1.33,
-    transmission: 1.0,
-    thickness: 2.0,
-    transparent: true,
-});
-
-
-// 4. Apufunktio koeputken luomiseen
-function createTestTube(position, liquidMaterial, liquidLevel) {
-    const group = new THREE.Group();
-    
-    // Koeputken mitat
-    const radius = 0.5;
-    const height = 3;
-    
-    // Ulkokuori (lasi)
-    // Sylinteri on ylhäältä auki (openEnded = true)
-    const tubeGeometry = new THREE.CylinderGeometry(radius, radius, height, 32, 1, true);
-    const tubeMesh = new THREE.Mesh(tubeGeometry, glassMaterial);
-
-    // Pyöreä pohja (lasi)
-    const bottomGeometry = new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const bottomMesh = new THREE.Mesh(bottomGeometry, glassMaterial);
-    bottomMesh.position.y = -height / 2; // Asetetaan sylinterin alapuolelle
-    
-    group.add(tubeMesh);
-    group.add(bottomMesh);
-
-    // Nesteen luonti
-    if (liquidMaterial) {
-        const liquidHeight = height * liquidLevel;
-        const liquidRadius = radius * 0.95; // Hieman kapeampi kuin putki
-        const liquidGeometry = new THREE.CylinderGeometry(liquidRadius, liquidRadius, liquidHeight, 32);
-        const liquidMesh = new THREE.Mesh(liquidGeometry, liquidMaterial);
+        // 1. Basic Setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2, 8);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        document.body.appendChild(renderer.domElement);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1.5, 0);
         
-        // Asetetaan neste putken pohjalle
-        liquidMesh.position.y = - (height - liquidHeight) / 2;
-        group.add(liquidMesh);
-    }
-    
-    group.position.copy(position);
-    scene.add(group);
-    return group;
-}
+        // 2. Lighting
+        const rgbeLoader = new RGBELoader();
+        rgbeLoader.load('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_03_1k.hdr', (texture) => {
+            texture.mapping = THREE.EquirectangularReflectionMapping;
+            scene.environment = texture;
+            scene.background = new THREE.Color(0xf0f0f0);
+        });
 
-// 5. Luodaan kolme koeputkea
-const tubeSpacing = 1.5;
+        // 3. Materials
+        const glassMaterial = new THREE.MeshPhysicalMaterial({
+            color: 0xffffff, metalness: 0, roughness: 0.05, ior: 1.5, transmission: 1.0,
+            thickness: 0.01, transparent: true, side: THREE.DoubleSide, depthWrite: false
+        });
+        const commonLiquidProperties = {
+            metalness: 0, roughness: 0.1, ior: 1.33, transmission: 1.0,
+            transparent: true, thickness: 0.15, depthWrite: true
+        };
+        const copperSulfateMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0x6495ED });
+        const ironSulfateMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0x98FB98 });
+        const leadNitrateMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0xffffff });
+        
+        const copperHydroxideMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0x40E0D0, roughness: 0.8, transmission: 0.5 });
+        const copperAmmoniumMaterial = new THREE.MeshPhysicalMaterial({ ...commonLiquidProperties, color: 0x483D8B, thickness: 0.8, transmission: 0.8 });
+        const ironHydroxideMaterial = new THREE.MeshPhysicalMaterial({ color: 0x556B2F, roughness: 0.9, transparent: false });
+        const leadIodideMaterial = new THREE.MeshPhysicalMaterial({ color: 0xFFD700, roughness: 0.9, transparent: false });
 
-// Vasen: Kuparisulfaatti (sininen), 70% täynnä
-createTestTube(
-    new THREE.Vector3(-tubeSpacing, 1.5, 0),
-    copperSulfateMaterial,
-    0.7
-);
+        // 4. Global variables
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const clickableObjects = [];
+        let drops = [];
+        let particles = [];
+        let reactions = [];
+        let selectedReagent = 'ammonia';
+        document.getElementById('reagent-select').addEventListener('change', (e) => { selectedReagent = e.target.value; });
+        document.getElementById('reset-button').addEventListener('click', resetSimulation);
 
-// Keskellä: Rautasulfaatti (vihreä), 50% täynnä
-createTestTube(
-    new THREE.Vector3(0, 1.5, 0),
-    ironSulfateMaterial,
-    0.5
-);
+        // 5. Helper function to create a test tube
+        function createTestTube(position, liquidMaterial, liquidLevel, id) {
+            const group = new THREE.Group();
+            const radius = 0.5;
+            const tubeHeight = 3.0;
+            const wallThickness = 0.05;
 
-// Oikealla: Lyijynitraatti (väritön), 80% täynnä
-createTestTube(
-    new THREE.Vector3(tubeSpacing, 1.5, 0),
-    leadNitrateMaterial,
-    0.8
-);
+            const bottomGeometry = new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            bottomGeometry.rotateX(Math.PI);
+            const tubeGeometry = new THREE.CylinderGeometry(radius, radius, tubeHeight, 32, 1, true);
+            tubeGeometry.translate(0, tubeHeight / 2, 0);
+            const mergedGlassGeom = BufferGeometryUtils.mergeGeometries([bottomGeometry, tubeGeometry]);
+            const glassMesh = new THREE.Mesh(mergedGlassGeom, glassMaterial);
+            glassMesh.renderOrder = 3;
+            group.add(glassMesh);
+            
+            let liquidMesh;
+            if (liquidMaterial) {
+                const liquidRadius = radius - wallThickness;
+                const liquidTubeHeight = tubeHeight * liquidLevel;
+                const liquidBottomGeom = new THREE.SphereGeometry(liquidRadius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+                liquidBottomGeom.rotateX(Math.PI);
+                const liquidTubeGeom = new THREE.CylinderGeometry(liquidRadius, liquidRadius, liquidTubeHeight, 32);
+                liquidTubeGeom.translate(0, liquidTubeHeight / 2, 0);
+                const mergedLiquidGeom = BufferGeometryUtils.mergeGeometries([liquidBottomGeom, liquidTubeGeom]);
+                mergedLiquidGeom.computeBoundingBox();
+                liquidMesh = new THREE.Mesh(mergedLiquidGeom, liquidMaterial.clone());
+                liquidMesh.renderOrder = 2;
+                group.add(liquidMesh);
+            }
+            
+            group.position.copy(position);
+            scene.add(group);
 
-// Lisätään lattia heijastuksia varten
-const floorGeometry = new THREE.PlaneGeometry(20, 20);
-const floorMaterial = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.5 });
-const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-floor.rotation.x = -Math.PI / 2;
-scene.add(floor);
+            glassMesh.userData = { 
+                id: id, group: group, liquidMesh: liquidMesh, dropCount: 0, 
+                complexLayer: null, liquidRadius: radius - wallThickness,
+                originalMaterial: liquidMaterial,
+                sedimentLevel: group.position.y + liquidMesh.geometry.boundingBox.min.y
+            };
+            clickableObjects.push(glassMesh);
+            return group;
+        }
 
+        // 6. Create initial tubes
+        createTestTube(new THREE.Vector3(-1.5, 1.5, 0), copperSulfateMaterial, 0.25, 'copperSulfate');
+        createTestTube(new THREE.Vector3(0, 1.5, 0), ironSulfateMaterial, 0.25, 'ironSulfate');
+        createTestTube(new THREE.Vector3(1.5, 1.5, 0), leadNitrateMaterial, 0.25, 'leadNitrate');
 
-// 6. Animaatiolooppi
-function animate() {
-    requestAnimationFrame(animate);
-    controls.update();
-    renderer.render(scene, camera);
-}
+        // 7. Interactivity & Reaction Logic
+        function addDrop(tubeData) {
+            const dropGeometry = new THREE.SphereGeometry(0.1, 16, 8);
+            const drop = new THREE.Mesh(dropGeometry, new THREE.MeshPhysicalMaterial({color: 0xffffff, transmission: 0.5, transparent: true}));
+            const tubeTopY = tubeData.group.position.y + 3.0;
+            const liquidSurfaceY = tubeData.group.position.y + tubeData.liquidMesh.geometry.boundingBox.max.y;
+            drop.position.set(tubeData.group.position.x, tubeTopY + 0.5, tubeData.group.position.z);
+            drop.userData = { targetY: liquidSurfaceY, tubeData: tubeData };
+            drops.push(drop);
+            scene.add(drop);
+        }
 
-// Ikkunan koon muutos
-window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-});
+        function createParticles(tubeData, material, count) {
+            const liquidBox = tubeData.liquidMesh.geometry.boundingBox;
+            for (let i = 0; i < count; i++) {
+                const particleGeom = new THREE.SphereGeometry(0.03, 8, 8);
+                const particle = new THREE.Mesh(particleGeom, material);
+                const surfaceY = tubeData.group.position.y + liquidBox.max.y;
+                
+                particle.position.set(
+                    tubeData.group.position.x + (Math.random() - 0.5) * 0.6,
+                    surfaceY - Math.random() * 0.1,
+                    tubeData.group.position.z + (Math.random() - 0.5) * 0.6
+                );
+                particle.userData.velocityY = 0;
+                particle.userData.tubeData = tubeData;
+                particles.push(particle);
+                scene.add(particle);
+            }
+            
+            // Aloitetaan nesteen muutos
+            reactions.push({
+                type: 'precipitate',
+                mesh: tubeData.liquidMesh,
+                startColor: new THREE.Color(tubeData.liquidMesh.material.color.getHex()),
+                endColor: new THREE.Color(material.color.getHex()),
+                startTransmission: tubeData.liquidMesh.material.transmission,
+                endTransmission: 0.1,
+                progress: 0
+            });
+        }
 
-animate();
+        function triggerReaction(tubeData) {
+            tubeData.dropCount++;
+            if (tubeData.id === 'copperSulfate' && selectedReagent === 'ammonia') {
+                if (tubeData.dropCount === 1) {
+                    tubeData.liquidMesh.material = copperHydroxideMaterial;
+                    const complexLayerGeom = new THREE.CylinderGeometry(0.45, 0.45, 0.1, 32);
+                    const complexLayer = new THREE.Mesh(complexLayerGeom, copperAmmoniumMaterial);
+                    const surfaceY = tubeData.liquidMesh.geometry.boundingBox.max.y;
+                    complexLayer.position.y = surfaceY - 0.05;
+                    complexLayer.renderOrder = 1;
+                    tubeData.group.add(complexLayer);
+                    tubeData.complexLayer = complexLayer;
+                } else if (tubeData.dropCount === 2) {
+                    if (tubeData.complexLayer) tubeData.group.remove(tubeData.complexLayer);
+                    tubeData.liquidMesh.material = copperAmmoniumMaterial;
+                }
+            }
+            if (tubeData.id === 'ironSulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
+                createParticles(tubeData, ironHydroxideMaterial, 200);
+            }
+            if (tubeData.id === 'leadNitrate' && selectedReagent === 'ki') {
+                createParticles(tubeData, leadIodideMaterial, 200);
+            }
+        }
+
+        function resetSimulation() {
+            // Poista dynaamiset objektit
+            drops.forEach(d => scene.remove(d));
+            particles.forEach(p => scene.remove(p));
+            drops = [];
+            particles = [];
+            reactions = [];
+
+            // Palauta koeputket
+            clickableObjects.forEach(glassMesh => {
+                const tubeData = glassMesh.userData;
+                tubeData.dropCount = 0;
+                if (tubeData.complexLayer) {
+                    tubeData.group.remove(tubeData.complexLayer);
+                    tubeData.complexLayer = null;
+                }
+                tubeData.liquidMesh.material = tubeData.originalMaterial;
+                tubeData.sedimentLevel = tubeData.group.position.y + tubeData.liquidMesh.geometry.boundingBox.min.y;
+            });
+        }
+
+        window.addEventListener('click', (event) => {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(clickableObjects);
+            if (intersects.length > 0) { addDrop(intersects[0].object.userData); }
+        });
+
+        // 8. Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            for (let i = drops.length - 1; i >= 0; i--) {
+                const drop = drops[i];
+                drop.position.y -= 0.1;
+                if (drop.position.y <= drop.userData.targetY) {
+                    triggerReaction(drop.userData.tubeData);
+                    scene.remove(drop);
+                    drops.splice(i, 1);
+                }
+            }
+            
+            for (const particle of particles) {
+                const tubeData = particle.userData.tubeData;
+                const tubeCenter = tubeData.group.position;
+                const liquidRadius = tubeData.liquidRadius;
+                
+                const targetY = tubeData.sedimentLevel;
+                const isInsideBottom = particle.position.y < tubeCenter.y && particle.position.distanceTo(tubeCenter) < liquidRadius;
+
+                if (particle.position.y > targetY && !isInsideBottom) {
+                    particle.userData.velocityY += 0.001;
+                    particle.position.y -= particle.userData.velocityY;
+                } else if (!isInsideBottom) {
+                     // Partikkeli on laskeutunut
+                    particle.position.y = targetY;
+                    tubeData.sedimentLevel += 0.001; // Kasvatetaan saostuman tasoa
+                }
+            }
+            
+            for (let i = reactions.length - 1; i >= 0; i--) {
+                const reaction = reactions[i];
+                if (reaction.type === 'precipitate' && reaction.progress < 1) {
+                    reaction.progress += 0.005;
+                    reaction.mesh.material.color.lerpColors(reaction.startColor, reaction.endColor, reaction.progress);
+                    reaction.mesh.material.transmission = THREE.MathUtils.lerp(reaction.startTransmission, reaction.endTransmission, reaction.progress);
+                } else if (reaction.progress >= 1) {
+                    reactions.splice(i, 1);
+                }
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        animate();
+    </script>
+</body>
+</html>
