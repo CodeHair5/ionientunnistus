@@ -184,7 +184,8 @@
                 precipitateMesh: null,
                 precipitateHeight: 0,
                 isRippleActive: false,
-                reactionPending: false
+                reactionPending: false,
+                reactionComplete: false // Uusi tila reaktion estämiseksi
             };
             clickableObjects.push(glassMesh);
         }
@@ -209,6 +210,8 @@
 
         // 7. Interactivity & Reaction Logic
         function addDrop(tubeData) {
+            if (tubeData.reactionComplete) return; // Estetään uudet tipat, jos reaktio on valmis
+
             const dropGeometry = new THREE.SphereGeometry(0.1, 16, 8);
             const drop = new THREE.Mesh(dropGeometry, new THREE.MeshPhysicalMaterial({color: 0xffffff, transmission: 0.8, transparent: true, roughness: 0.1}));
             const tubeTopY = tubeData.group.position.y + 3.0;
@@ -262,14 +265,13 @@
         function triggerReaction(tubeData) {
             tubeData.dropCount++;
             tubeData.isRippleActive = true;
+            tubeData.reactionPending = true;
             
             if (tubeData.liquidMesh && tubeData.liquidMesh.material.uniforms) {
                 tubeData.liquidMesh.material.uniforms.u_ripple_active.value = 1.0;
                 tubeData.liquidMesh.material.uniforms.u_ripple_start_time.value = clock.getElapsedTime();
             }
-
-            // Asetetaan reaktio odottamaan, mutta luodaan heti tippuvat partikkelit
-            tubeData.reactionPending = true;
+            
             handleSinkingParticles(tubeData);
         }
         
@@ -281,30 +283,32 @@
                     tubeData.group.position.x, tubeData.group.position.y + tubeData.originalLiquidHeight, tubeData.group.position.z
                 );
                 createSplash(surfacePosition, precipitateMaterial.color);
-                createSinkingParticles(tubeData, precipitateMaterial, 15);
+                createSinkingParticles(tubeData, precipitateMaterial.clone(), 15);
             }
         }
-
 
         function startPrecipitation(tubeData) {
             tubeData.reactionPending = false;
             let precipitateMaterial = getPrecipitateMaterial(tubeData);
 
-            if (tubeData.id === 'copperSulfate' && selectedReagent === 'ammonia' && tubeData.dropCount >= 2) {
+            // --- KORJAUS: Ammoniakkikompleksin muodostus ---
+            if (tubeData.id === 'copperSulfate' && selectedReagent === 'ammonia' && tubeData.dropCount > 5) { // Vaatii enemmän kuin yhden tipan
                 if (tubeData.precipitateMesh) {
                     tubeData.group.remove(tubeData.precipitateMesh);
                     tubeData.precipitateMesh.geometry.dispose();
                     tubeData.precipitateMesh = null;
-                    tubeData.precipitateHeight = 0;
-                    const liquidRadius = 0.5 - 0.05;
-                    const newLiquidGeom = createLiquidGeometry(liquidRadius, tubeData.originalLiquidHeight, 0);
-                    tubeData.liquidMesh.geometry.dispose();
-                    tubeData.liquidMesh.geometry = newLiquidGeom;
                 }
+                tubeData.precipitateHeight = 0;
+                const liquidRadius = 0.5 - 0.05;
+                const newLiquidGeom = createLiquidGeometry(liquidRadius, tubeData.originalLiquidHeight, 0);
+                tubeData.liquidMesh.geometry.dispose();
+                tubeData.liquidMesh.geometry = newLiquidGeom;
+                
                 const oldUniforms = tubeData.liquidMesh.material.uniforms;
                 tubeData.liquidMesh.material = copperAmmoniumMaterial.clone();
                 tubeData.liquidMesh.material.uniforms.u_ripple_start_time = oldUniforms.u_ripple_start_time;
                 tubeData.liquidMesh.material.uniforms.u_ripple_active = oldUniforms.u_ripple_active;
+                tubeData.reactionComplete = true; // Estetään jatkoreaktiot
                 return;
             }
 
@@ -324,7 +328,7 @@
         
         function getPrecipitateMaterial(tubeData) {
             const id = tubeData.id;
-            if (id === 'copperSulfate' && (selectedReagent === 'naoh' || (selectedReagent === 'ammonia' && tubeData.dropCount === 1))) {
+            if (id === 'copperSulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
                 return copperHydroxideMaterial;
             } else if (id === 'ironIISulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
                 return ironIIHydroxideMaterial;
@@ -351,6 +355,7 @@
                 tubeData.precipitateHeight = 0;
                 tubeData.isRippleActive = false;
                 tubeData.reactionPending = false;
+                tubeData.reactionComplete = false;
                 tubeData.liquidMesh.material = tubeData.originalMaterial.clone();
                 if (tubeData.precipitateMesh) {
                     tubeData.group.remove(tubeData.precipitateMesh);
@@ -372,6 +377,15 @@
             const intersects = raycaster.intersectObjects(clickableObjects);
             if (intersects.length > 0) { addDrop(intersects[0].object.userData); }
         });
+
+        function fadeLiquidColor(tubeData) {
+            const color = tubeData.liquidMesh.material.uniforms.u_color.value;
+            const hsl = {};
+            color.getHSL(hsl);
+            hsl.s = Math.max(0.1, hsl.s * 0.98); 
+            hsl.l = Math.min(1.0, hsl.l + 0.002); 
+            color.setHSL(hsl.h, hsl.s, hsl.l);
+        }
 
         // 8. Animation Loop
         function animate() {
@@ -433,8 +447,7 @@
                 particle.position.y -= particle.userData.velocityY;
 
                 if (particle.position.y <= tubeBottomY + tubeData.precipitateHeight) {
-                    // Kasvatetaan sakkaa vain, jos aaltoilu on ohi TAI sakkaa on jo olemassa
-                    if (tubeData.precipitateMesh && !tubeData.isRippleActive) {
+                    if (tubeData.precipitateMesh && (!tubeData.isRippleActive || tubeData.precipitateHeight > 0)) {
                         tubeData.precipitateHeight += 0.005;
                         const maxPrecipitateHeight = tubeData.originalLiquidHeight * 0.8;
                         tubeData.precipitateHeight = Math.min(tubeData.precipitateHeight, maxPrecipitateHeight);
@@ -449,6 +462,8 @@
                         const newLiquidGeom = createLiquidGeometry(liquidRadius, newLiquidHeight, tubeData.precipitateHeight);
                         tubeData.liquidMesh.geometry.dispose();
                         tubeData.liquidMesh.geometry = newLiquidGeom;
+                        
+                        fadeLiquidColor(tubeData);
                     }
                     scene.remove(particle);
                     sinkingParticles.splice(i, 1);
@@ -469,4 +484,3 @@
     </script>
 </body>
 </html>
-
