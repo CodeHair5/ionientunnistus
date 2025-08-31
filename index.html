@@ -3,26 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js Koeputket - Saostuminen</title>
+    <title>Three.js - Koeputket - Hienosäädetty vesiefekti</title>
     <style>
-        body { margin: 0; background-color: #f0f0f0; overflow: hidden; font-family: sans-serif; }
+        body { margin: 0; background-color: #333; overflow: hidden; font-family: sans-serif; }
         canvas { display: block; }
-        #controls {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            padding: 10px;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 5px;
-            display: flex;
-            align-items: center;
-        }
+        #controls { position: absolute; top: 10px; left: 10px; padding: 10px; background: rgba(255, 255, 255, 0.8); border-radius: 5px; display: flex; align-items: center; visibility: hidden; }
         label { margin-right: 5px; }
         button { margin-left: 10px; }
+        #start-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0, 0, 0, 0.7); display: flex;
+            justify-content: center; align-items: center; color: white;
+        }
+        #start-button { font-size: 2em; padding: 20px 40px; cursor: pointer; border: none; border-radius: 10px; }
+        #start-button:disabled { cursor: wait; background-color: #555; color: #aaa; }
+        
+        /* UUSI OHJETEKSTI */
+        #instructions {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 20px;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            border-radius: 8px;
+            text-align: center;
+            visibility: hidden; /* Piilotettu oletuksena */
+            transition: opacity 0.5s;
+        }
     </style>
 </head>
 <body>
-    <!-- Valikko ja nappi -->
     <div id="controls">
         <label for="reagent-select">Valitse reagenssi:</label>
         <select id="reagent-select">
@@ -32,8 +44,15 @@
         </select>
         <button id="reset-button">Aloita alusta</button>
     </div>
+    
+    <div id="start-screen">
+        <button id="start-button" disabled>Ladataan...</button>
+    </div>
 
-    <!-- Import map for Three.js and its addons -->
+    <div id="instructions">
+        Mitä ioneja koeputket sisältävät?<br>Valitse tunnistusreagenssi ja klikkaa koeputkea.
+    </div>
+
     <script type="importmap">
         {
             "imports": {
@@ -43,444 +62,359 @@
         }
     </script>
 
-    <!-- Main application script -->
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
         import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
-        // 1. Basic Setup
+        // 1. Perusasetukset
         const scene = new THREE.Scene();
         const clock = new THREE.Clock();
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 2, 9);
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 2.5, 12); // Siirretään kameraa hieman taaemmas
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.localClippingEnabled = true;
         document.body.appendChild(renderer.domElement);
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.target.set(0, 1.5, 0);
-         
-        // 2. Lighting
-        const rgbeLoader = new RGBELoader();
-        rgbeLoader.load('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_03_1k.hdr', (texture) => {
+
+        const startButton = document.getElementById('start-button');
+        new RGBELoader().load('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_03_1k.hdr', (texture) => {
             texture.mapping = THREE.EquirectangularReflectionMapping;
             scene.environment = texture;
-            scene.background = new THREE.Color(0xf0f0f0);
-        });
-
-        // 3. Materials
-        const glassMaterial = new THREE.MeshPhysicalMaterial({
-            color: 0xffffff, metalness: 0, roughness: 0.05, ior: 1.5, transmission: 1.0,
-            thickness: 0.1, transparent: true, side: THREE.DoubleSide, depthWrite: false
-        });
-        
-        const vertexShader = `
-            uniform float u_time;
-            uniform float u_ripple_start_time;
-            uniform float u_ripple_active;
             
-            void main() {
-                vec3 pos = position;
-                if (u_ripple_active > 0.5) {
-                    float time_since_ripple = u_time - u_ripple_start_time;
-                    if (time_since_ripple > 0.0 && time_since_ripple < 2.5) {
-                        float dist = distance(pos.xz, vec2(0.0, 0.0));
-                        float ripple_wave = sin(dist * 25.0 - time_since_ripple * 10.0);
-                        
-                        float damping = 1.0 - smoothstep(0.0, 2.5, time_since_ripple);
-                        damping *= smoothstep(0.4, 0.0, dist);
+            // UUSI: Esiladataan shaderit ennen kuin aloitetaan
+            preloadShaders();
 
-                        pos.y += ripple_wave * 0.08 * damping;
-                    }
-                }
-                gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(pos, 1.0);
-            }
-        `;
-
-        const fragmentShader = `
-            uniform vec3 u_color;
-            void main() {
-                gl_FragColor = vec4(u_color, 0.75);
-            }
-        `;
-
-        function createLiquidShaderMaterial(color) {
-            return new THREE.ShaderMaterial({
-                vertexShader: vertexShader,
-                fragmentShader: fragmentShader,
-                uniforms: {
-                    u_time: { value: 0.0 },
-                    u_color: { value: new THREE.Color(color) },
-                    u_ripple_start_time: { value: -1000.0 },
-                    u_ripple_active: { value: 0.0 },
-                },
-                transparent: true,
-                side: THREE.DoubleSide,
-            });
-        }
-
-        const copperSulfateMaterial = createLiquidShaderMaterial(0x6495ED);
-        const ironIISulfateMaterial = createLiquidShaderMaterial(0x98FB98);
-        const leadNitrateMaterial = createLiquidShaderMaterial(0xffffff);
-        const ironIIISulfateMaterial = createLiquidShaderMaterial(0xD2B48C);
-        const copperAmmoniumMaterial = createLiquidShaderMaterial(0x483D8B);
+            startButton.disabled = false;
+            startButton.textContent = 'Aloita simulaatio';
+        });
         
-        const createPrecipitateMaterial = (color) => new THREE.MeshPhysicalMaterial({ color, roughness: 0.9, transparent: true, opacity: 1.0 });
-        const copperHydroxideMaterial = createPrecipitateMaterial(0x40E0D0);
-        const ironIIHydroxideMaterial = createPrecipitateMaterial(0x556B2F);
-        const leadHydroxideMaterial = createPrecipitateMaterial(0xffffff);
-        const leadIodideMaterial = createPrecipitateMaterial(0xFFD700);
-        const ironIIIHydroxideMaterial = createPrecipitateMaterial(0x8B4513);
+        const glassMaterial = new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0.1, roughness: 0.05, ior: 1.5, transmission: 1.0, transparent: true });
+        const createPrecipitateMaterial = (color, clippingPlane) => new THREE.MeshPhysicalMaterial({
+            color, roughness: 0.8, side: THREE.DoubleSide, clippingPlanes: [clippingPlane]
+        });
 
-        // 4. Global variables
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
-        const clickableObjects = [];
-        let drops = [];
-        let splashParticles = [];
+        const clickableTubes = [];
+        let activeDrops = [];
         let sinkingParticles = [];
         let selectedReagent = 'ammonia';
-        document.getElementById('reagent-select').addEventListener('change', (e) => { selectedReagent = e.target.value; });
-        document.getElementById('reset-button').addEventListener('click', resetSimulation);
+        const particlePool = [];
+        const MAX_PARTICLES = 200; 
 
-        // 5. Helper function to create a test tube
-        function createTestTube(position, liquidMaterial, liquidLevel, id) {
+        function createTubeGeometry(radius, height, openEnded = false) {
+            const cylinderHeight = height - radius;
+            if (cylinderHeight < 0) return new THREE.BufferGeometry();
+            const tubeCylinder = new THREE.CylinderGeometry(radius, radius, cylinderHeight, 32, 1, openEnded);
+            tubeCylinder.translate(0, cylinderHeight / 2, 0);
+            const bottomSphere = new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+            bottomSphere.rotateX(Math.PI);
+            const merged = BufferGeometryUtils.mergeGeometries([bottomSphere, tubeCylinder]);
+            merged.translate(0, radius, 0);
+            return merged;
+        }
+        
+        function createTestTube(position, id, liquidColor) {
             const group = new THREE.Group();
-            const radius = 0.5;
-            const tubeHeight = 3.0;
-            const wallThickness = 0.05;
-
-            const bottomGeometry = new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-            bottomGeometry.rotateX(Math.PI);
-            const tubeGeometry = new THREE.CylinderGeometry(radius, radius, tubeHeight, 32, 1, true);
-            tubeGeometry.translate(0, tubeHeight / 2, 0);
-            const mergedGlassGeom = BufferGeometryUtils.mergeGeometries([bottomGeometry, tubeGeometry]);
-            const glassMesh = new THREE.Mesh(mergedGlassGeom, glassMaterial);
-            glassMesh.renderOrder = 3;
-            group.add(glassMesh);
-             
-            let liquidMesh;
-            if (liquidMaterial) {
-                const liquidRadius = radius - wallThickness;
-                const liquidTubeHeight = tubeHeight * liquidLevel;
-                const liquidGeom = createLiquidGeometry(liquidRadius, liquidTubeHeight, 0);
-                
-                const material = liquidMaterial.clone();
-                liquidMesh = new THREE.Mesh(liquidGeom, material);
-                liquidMesh.renderOrder = 2;
-                group.add(liquidMesh);
-            }
-             
             group.position.copy(position);
-            scene.add(group);
+            
+            const TUBE_RADIUS = 0.5, TUBE_HEIGHT = 3.0, WALL_THICKNESS = 0.05;
+            const LIQUID_HEIGHT = TUBE_HEIGHT * 0.6, LIQUID_RADIUS = TUBE_RADIUS - WALL_THICKNESS;
+
+            const glassGeometry = createTubeGeometry(TUBE_RADIUS, TUBE_HEIGHT, false);
+            const glassMesh = new THREE.Mesh(glassGeometry, glassMaterial);
+            glassMesh.renderOrder = 4;
+            group.add(glassMesh);
+            
+            const liquidBodyGeom = createTubeGeometry(LIQUID_RADIUS, LIQUID_HEIGHT, true);
+            const liquidBodyMat = new THREE.MeshPhysicalMaterial({ 
+                color: liquidColor, roughness: 0.1, transmission: 0.9, transparent: true, thickness: 0.2, side: THREE.DoubleSide
+            });
+            const liquidBodyMesh = new THREE.Mesh(liquidBodyGeom, liquidBodyMat);
+            liquidBodyMesh.renderOrder = 3;
+            group.add(liquidBodyMesh);
+
+            const liquidSurfaceGeom = new THREE.CircleGeometry(LIQUID_RADIUS, 64);
+            liquidSurfaceGeom.rotateX(-Math.PI / 2);
+            liquidSurfaceGeom.translate(0, LIQUID_HEIGHT, 0);
+            
+            const originalMaterial = new THREE.MeshPhysicalMaterial({
+                color: liquidColor, roughness: 0.1, transmission: 0.9, transparent: true, thickness: 0.2
+            });
+
+            const shaderUniforms = {
+                uTime: { value: 0 },
+                uDropTime: { value: -1000 },
+                uDropCenter: { value: new THREE.Vector2(0.5, 0.5) },
+            };
+
+            originalMaterial.onBeforeCompile = (shader) => {
+                shader.uniforms.uTime = shaderUniforms.uTime;
+                shader.uniforms.uDropTime = shaderUniforms.uDropTime;
+                shader.uniforms.uDropCenter = shaderUniforms.uDropCenter;
+                shader.vertexShader = `
+                    uniform float uTime; uniform float uDropTime; uniform vec2 uDropCenter;
+                    float getWaveHeight(vec2 uvPos) {
+                        float timeSinceDrop = uTime - uDropTime;
+                        if (timeSinceDrop < 0.0 || timeSinceDrop > 3.0) return 0.0;
+                        vec2 centeredUv = uvPos - vec2(0.5); float dist = length(centeredUv) * 2.0;
+                        float speed = 1.2; float frequency = 20.0;
+                        float waveFront = timeSinceDrop * speed;
+                        if (dist > waveFront + 0.1) return 0.0;
+                        float decay = 1.0 - timeSinceDrop / 3.0; float amplitude = 0.11 * decay * decay;
+                        float wave = sin(dist * frequency - timeSinceDrop * speed * frequency);
+                        float pulse = smoothstep(waveFront, waveFront - 1.0, dist);
+                        return wave * amplitude * pulse;
+                    }
+                ` + shader.vertexShader;
+                shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\ntransformed.y += getWaveHeight(uv);`);
+                shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>\nfloat gridStep = 0.02;float hU = getWaveHeight(uv + vec2(gridStep, 0.0));float hD = getWaveHeight(uv - vec2(gridStep, 0.0));float hL = getWaveHeight(uv + vec2(0.0, gridStep));float hR = getWaveHeight(uv - vec2(0.0, gridStep));objectNormal = normalize(vec3(hD - hU, gridStep * 2.0, hR - hL));`);
+            };
+
+            const liquidSurfaceMesh = new THREE.Mesh(liquidSurfaceGeom, originalMaterial);
+            liquidSurfaceMesh.renderOrder = 3;
+            liquidSurfaceMesh.userData = { shaderUniforms };
+            group.add(liquidSurfaceMesh);
+
+            const precipitateClipPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+            const precipitateGeometry = createTubeGeometry(LIQUID_RADIUS, LIQUID_HEIGHT, true);
+            const precipitateMesh = new THREE.Mesh(precipitateGeometry, null);
+            precipitateMesh.renderOrder = 1; precipitateMesh.visible = false; group.add(precipitateMesh);
+            
+            const capGeometry = new THREE.CircleGeometry(LIQUID_RADIUS, 32);
+            capGeometry.rotateX(-Math.PI / 2);
+            const precipitateCapMesh = new THREE.Mesh(capGeometry, null);
+            precipitateCapMesh.renderOrder = 2; precipitateCapMesh.visible = false; group.add(precipitateCapMesh);
 
             glassMesh.userData = { 
-                id: id, group: group, liquidMesh: liquidMesh, dropCount: 0, 
-                originalMaterial: liquidMaterial.clone(),
-                originalLiquidHeight: tubeHeight * liquidLevel,
-                precipitateMesh: null,
-                precipitateHeight: 0,
-                isRippleActive: false,
-                reactionPending: false,
-                reactionComplete: false // Uusi tila reaktion estämiseksi
+                id, group, liquidMesh: liquidBodyMesh, liquidSurface: liquidSurfaceMesh, precipitateMesh, precipitateCapMesh, precipitateClipPlane, dropCount: 0, originalColor: liquidColor, 
+                originalLiquidHeight: LIQUID_HEIGHT, precipitateHeight: 0, liquidRadius: LIQUID_RADIUS, 
+                reactionComplete: false, isDissolving: false, precipitateTargetHeight: 0, growthPending: false 
             };
-            clickableObjects.push(glassMesh);
+            clickableTubes.push(glassMesh);
+            return group;
         }
 
-        function createLiquidGeometry(radius, height, bottomOffset) {
-            if (height <= 0.001) return new THREE.BufferGeometry();
-            const bottomGeom = new THREE.SphereGeometry(radius, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-            bottomGeom.rotateX(Math.PI);
-            const tubeGeom = new THREE.CylinderGeometry(radius, radius, height, 32, 32);
-            tubeGeom.translate(0, height / 2, 0);
-            const mergedGeom = BufferGeometryUtils.mergeGeometries([bottomGeom, tubeGeom]);
-            mergedGeom.translate(0, bottomOffset, 0);
-            return mergedGeom;
+        // MUUTOS: Lisätty hopeanitraatin reaktiot
+        function getReactionResult(tubeId, reagent) {
+            const reactions = {
+                copperSulfate: { naoh: 0x55E0C0, ammonia: 0x55E0C0 },
+                ironIISulfate: { naoh: 0x8FBC8F, ammonia: 0x8FBC8F },
+                ironIIISulfate: { naoh: 0xA0522D, ammonia: 0xA0522D },
+                leadNitrate: { naoh: 0xf0f0f0, ammonia: 0xf0f0f0, ki: 0xFFEB00 },
+                silverNitrate: { naoh: 0x8B4513, ki: 0xFFFF00 } // Ruskea ja keltainen
+            };
+            return reactions[tubeId]?.[reagent] || null;
         }
 
-        // 6. Create initial tubes
-        const tubeSpacing = 2.0;
-        createTestTube(new THREE.Vector3(-tubeSpacing * 1.5, 1.5, 0), copperSulfateMaterial, 0.25, 'copperSulfate');
-        createTestTube(new THREE.Vector3(-tubeSpacing * 0.5, 1.5, 0), ironIISulfateMaterial, 0.25, 'ironIISulfate');
-        createTestTube(new THREE.Vector3(tubeSpacing * 0.5, 1.5, 0), leadNitrateMaterial, 0.25, 'leadNitrate');
-        createTestTube(new THREE.Vector3(tubeSpacing * 1.5, 1.5, 0), ironIIISulfateMaterial, 0.25, 'ironIIISulfate');
-
-        // 7. Interactivity & Reaction Logic
-        function addDrop(tubeData) {
-            if (tubeData.reactionComplete) return; // Estetään uudet tipat, jos reaktio on valmis
-
-            const dropGeometry = new THREE.SphereGeometry(0.1, 16, 8);
-            const drop = new THREE.Mesh(dropGeometry, new THREE.MeshPhysicalMaterial({color: 0xffffff, transmission: 0.8, transparent: true, roughness: 0.1}));
-            const tubeTopY = tubeData.group.position.y + 3.0;
-            const liquidSurfaceY = tubeData.group.position.y + tubeData.originalLiquidHeight;
+        // UUSI FUNKTIO: Shaderien esilataus suorituskyvyn parantamiseksi
+        function preloadShaders() {
+            console.log("Pre-compiling shaders...");
+            const dummyScene = new THREE.Scene();
+            const dummyGeom = new THREE.SphereGeometry(0.01);
+            const dummyPlane = new THREE.Plane();
             
-            drop.position.set(tubeData.group.position.x, tubeTopY + 0.5, tubeData.group.position.z);
-            drop.userData = { targetY: liquidSurfaceY, tubeData: tubeData };
-            drops.push(drop);
-            scene.add(drop);
-        }
-        
-        function createSplash(position, color) {
-            const splashMaterial = new THREE.PointsMaterial({
-                color: color, size: 0.05, transparent: true, opacity: 0.8, depthWrite: false
+            const uniqueColors = new Set();
+            const reactions = { // Otetaan kaikki mahdolliset reaktiot
+                copperSulfate: { naoh: 0x55E0C0, ammonia: 0x55E0C0 }, ironIISulfate: { naoh: 0x8FBC8F, ammonia: 0x8FBC8F },
+                ironIIISulfate: { naoh: 0xA0522D, ammonia: 0xA0522D }, leadNitrate: { naoh: 0xf0f0f0, ammonia: 0xf0f0f0, ki: 0xFFD700 },
+                silverNitrate: { naoh: 0x4B3621, ki: 0xF5DEB3 }
+            };
+
+            for (const tube in reactions) {
+                for (const reagent in reactions[tube]) {
+                    uniqueColors.add(reactions[tube][reagent]);
+                }
+            }
+
+            uniqueColors.forEach(color => {
+                const mat = createPrecipitateMaterial(color, dummyPlane);
+                const mesh = new THREE.Mesh(dummyGeom, mat);
+                dummyScene.add(mesh);
             });
-            const splashGeometry = new THREE.BufferGeometry();
-            const vertices = [];
-            for (let i = 0; i < 50; i++) { vertices.push(0, 0, 0); }
-            splashGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-            const splash = new THREE.Points(splashGeometry, splashMaterial);
-            splash.position.copy(position);
-            splash.userData.life = 1.0; 
-            splash.userData.velocities = [];
-            for (let i = 0; i < 50; i++) {
-                splash.userData.velocities.push(
-                    (Math.random() - 0.5) * 0.5, (Math.random()) * 0.5, (Math.random() - 0.5) * 0.5
-                );
-            }
-            splashParticles.push(splash);
-            scene.add(splash);
-        }
 
-        function createSinkingParticles(tubeData, material, count) {
-            for (let i = 0; i < count; i++) {
-                const particleGeom = new THREE.SphereGeometry(0.02, 6, 6);
-                const particle = new THREE.Mesh(particleGeom, material);
-                const surfaceY = tubeData.group.position.y + tubeData.originalLiquidHeight;
-                
-                particle.position.set(
-                    tubeData.group.position.x + (Math.random() - 0.5) * 0.6,
-                    surfaceY - Math.random() * 0.2,
-                    tubeData.group.position.z + (Math.random() - 0.5) * 0.6
-                );
-                particle.userData.velocityY = (Math.random() - 0.8) * 0.005;
-                particle.userData.tubeData = tubeData;
-                sinkingParticles.push(particle);
-                scene.add(particle);
-            }
-        }
-
-        function triggerReaction(tubeData) {
-            tubeData.dropCount++;
-            tubeData.isRippleActive = true;
-            tubeData.reactionPending = true;
-            
-            if (tubeData.liquidMesh && tubeData.liquidMesh.material.uniforms) {
-                tubeData.liquidMesh.material.uniforms.u_ripple_active.value = 1.0;
-                tubeData.liquidMesh.material.uniforms.u_ripple_start_time.value = clock.getElapsedTime();
-            }
-            
-            handleSinkingParticles(tubeData);
+            renderer.compile(dummyScene, camera);
+             console.log("Shaders compiled.");
         }
         
-        function handleSinkingParticles(tubeData) {
-            let precipitateMaterial = getPrecipitateMaterial(tubeData);
-            
-            if (precipitateMaterial) {
-                const surfacePosition = new THREE.Vector3(
-                    tubeData.group.position.x, tubeData.group.position.y + tubeData.originalLiquidHeight, tubeData.group.position.z
-                );
-                createSplash(surfacePosition, precipitateMaterial.color);
-                createSinkingParticles(tubeData, precipitateMaterial.clone(), 15);
+        function initializeSimulation() {
+            // MUUTOS: Lisätty hopeanitraatti
+            const tubeDefs = [
+                { id: 'copperSulfate', color: 0x6495ED },
+                { id: 'ironIISulfate', color: 0x98FB98 },
+                { id: 'leadNitrate', color: 0xffffff },
+                { id: 'ironIIISulfate', color: 0xD2B48C },
+                { id: 'silverNitrate', color: 0xffffff }
+            ];
+            tubeDefs.forEach((def, i) => {
+                const xPos = (i - (tubeDefs.length - 1) / 2) * 1.8;
+                scene.add(createTestTube(new THREE.Vector3(xPos, 0, 0), def.id, def.color));
+            });
+            const particleGeom = new THREE.SphereGeometry(0.02, 8, 8);
+            for (let i = 0; i < MAX_PARTICLES; i++) {
+                const particle = new THREE.Mesh(particleGeom, new THREE.MeshBasicMaterial());
+                particle.visible = false; scene.add(particle); particlePool.push(particle);
             }
         }
-
-        function startPrecipitation(tubeData) {
-            tubeData.reactionPending = false;
-            let precipitateMaterial = getPrecipitateMaterial(tubeData);
-
-            // --- KORJAUS: Ammoniakkikompleksin muodostus ---
-            if (tubeData.id === 'copperSulfate' && selectedReagent === 'ammonia' && tubeData.dropCount > 5) { // Vaatii enemmän kuin yhden tipan
-                if (tubeData.precipitateMesh) {
-                    tubeData.group.remove(tubeData.precipitateMesh);
-                    tubeData.precipitateMesh.geometry.dispose();
-                    tubeData.precipitateMesh = null;
-                }
-                tubeData.precipitateHeight = 0;
-                const liquidRadius = 0.5 - 0.05;
-                const newLiquidGeom = createLiquidGeometry(liquidRadius, tubeData.originalLiquidHeight, 0);
-                tubeData.liquidMesh.geometry.dispose();
-                tubeData.liquidMesh.geometry = newLiquidGeom;
-                
-                const oldUniforms = tubeData.liquidMesh.material.uniforms;
-                tubeData.liquidMesh.material = copperAmmoniumMaterial.clone();
-                tubeData.liquidMesh.material.uniforms.u_ripple_start_time = oldUniforms.u_ripple_start_time;
-                tubeData.liquidMesh.material.uniforms.u_ripple_active = oldUniforms.u_ripple_active;
-                tubeData.reactionComplete = true; // Estetään jatkoreaktiot
-                return;
-            }
-
-            if (precipitateMaterial) {
-                if (!tubeData.precipitateMesh) {
-                    const precipitateGeom = createLiquidGeometry(0.45, 0.001, 0);
-                    const precipitateMesh = new THREE.Mesh(precipitateGeom, precipitateMaterial);
-                    precipitateMesh.renderOrder = 1;
-                    tubeData.group.add(precipitateMesh);
-                    tubeData.precipitateMesh = precipitateMesh;
-                }
-                if (tubeData.id === 'leadNitrate' && selectedReagent === 'ki') {
-                    tubeData.precipitateMesh.material = leadIodideMaterial;
-                }
-            }
-        }
-        
-        function getPrecipitateMaterial(tubeData) {
-            const id = tubeData.id;
-            if (id === 'copperSulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
-                return copperHydroxideMaterial;
-            } else if (id === 'ironIISulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
-                return ironIIHydroxideMaterial;
-            } else if (id === 'leadNitrate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
-                return leadHydroxideMaterial;
-            } else if (id === 'leadNitrate' && selectedReagent === 'ki') {
-                return leadIodideMaterial;
-            } else if (id === 'ironIIISulfate' && (selectedReagent === 'naoh' || selectedReagent === 'ammonia')) {
-                return ironIIIHydroxideMaterial;
-            }
-            return null;
-        }
-
 
         function resetSimulation() {
-            drops.forEach(d => scene.remove(d));
-            splashParticles.forEach(p => scene.remove(p));
-            sinkingParticles.forEach(p => scene.remove(p));
-            drops = []; splashParticles = []; sinkingParticles = [];
-
-            clickableObjects.forEach(glassMesh => {
-                const tubeData = glassMesh.userData;
-                tubeData.dropCount = 0;
-                tubeData.precipitateHeight = 0;
-                tubeData.isRippleActive = false;
-                tubeData.reactionPending = false;
-                tubeData.reactionComplete = false;
-                tubeData.liquidMesh.material = tubeData.originalMaterial.clone();
-                if (tubeData.precipitateMesh) {
-                    tubeData.group.remove(tubeData.precipitateMesh);
-                    tubeData.precipitateMesh.geometry.dispose();
-                    tubeData.precipitateMesh = null;
-                }
-                const liquidRadius = 0.5 - 0.05;
-                const newLiquidGeom = createLiquidGeometry(liquidRadius, tubeData.originalLiquidHeight, 0);
-                tubeData.liquidMesh.geometry.dispose();
-                tubeData.liquidMesh.geometry = newLiquidGeom;
+            clickableTubes.forEach(glassMesh => {
+                const tubeState = glassMesh.userData;
+                tubeState.precipitateHeight = 0; tubeState.precipitateTargetHeight = 0;
+                tubeState.precipitateClipPlane.constant = 0;
+                tubeState.precipitateMesh.visible = false; tubeState.precipitateMesh.material = null;
+                tubeState.precipitateCapMesh.visible = false; tubeState.precipitateCapMesh.material = null;
+                tubeState.liquidMesh.material.color.set(tubeState.originalColor);
+                tubeState.liquidSurface.material.color.set(tubeState.originalColor);
+                tubeState.liquidSurface.userData.shaderUniforms.uDropTime.value = -1000;
+                tubeState.dropCount = 0; tubeState.reactionComplete = false;
+                tubeState.isDissolving = false; tubeState.growthPending = false;
             });
+            sinkingParticles.forEach(p => { p.visible = false; particlePool.push(p); });
+            sinkingParticles = [];
+            activeDrops.forEach(d => scene.remove(d)); activeDrops = [];
         }
 
+        function addDrop(tubeState) {
+            if (tubeState.reactionComplete) return;
+            const drop = new THREE.Mesh( new THREE.SphereGeometry(0.1, 16, 8), new THREE.MeshPhysicalMaterial({color: 0xffffff, transmission: 0.8, transparent: true, roughness: 0.1}));
+            const liquidSurfaceY = tubeState.group.position.y + tubeState.originalLiquidHeight;
+            drop.position.set(tubeState.group.position.x, liquidSurfaceY + 2.0, tubeState.group.position.z);
+            drop.userData = { isDrop: true, targetY: liquidSurfaceY, tubeState: tubeState };
+            activeDrops.push(drop); scene.add(drop);
+        }
+
+        function onDropImpact(tubeState) {
+            triggerReaction(tubeState);
+            const uniforms = tubeState.liquidSurface.userData.shaderUniforms;
+            uniforms.uDropTime.value = clock.getElapsedTime() - 1.1; 
+            uniforms.uDropCenter.value.set(0.5 + (Math.random() - 0.5) * 0.3, 0.5 + (Math.random() - 0.5) * 0.3);
+        }
+
+        function triggerReaction(tubeState) {
+            if (tubeState.reactionComplete) return;
+            tubeState.dropCount++;
+            const precipitateColor = getReactionResult(tubeState.id, selectedReagent);
+            if (precipitateColor) {
+                tubeState.growthPending = true;
+                for(let i=0; i < 10; i++) activateSinkingParticle(tubeState, precipitateColor);
+            }
+        }
+        
+        function activateSinkingParticle(tubeState, color) {
+            if (particlePool.length === 0) return;
+            const particle = particlePool.pop(); particle.material.color.set(color);
+            const surfaceY = tubeState.group.position.y + tubeState.originalLiquidHeight;
+            particle.position.set( tubeState.group.position.x + (Math.random() - 0.5) * tubeState.liquidRadius, surfaceY, tubeState.group.position.z + (Math.random() - 0.5) * tubeState.liquidRadius);
+            particle.userData.velocityY = 0; particle.userData.acceleration = 0.4 + Math.random() * 0.4;
+            particle.userData.tubeState = tubeState; particle.visible = true; sinkingParticles.push(particle);
+        }
+
+        const raycaster = new THREE.Raycaster();
         window.addEventListener('click', (event) => {
-            const rect = renderer.domElement.getBoundingClientRect();
-            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            const mouse = new THREE.Vector2((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
             raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(clickableObjects);
-            if (intersects.length > 0) { addDrop(intersects[0].object.userData); }
+            const intersects = raycaster.intersectObjects(clickableTubes);
+            if (intersects.length > 0) addDrop(intersects[0].object.userData);
         });
-
-        function fadeLiquidColor(tubeData) {
-            const color = tubeData.liquidMesh.material.uniforms.u_color.value;
-            const hsl = {};
-            color.getHSL(hsl);
-            hsl.s = Math.max(0.1, hsl.s * 0.98); 
-            hsl.l = Math.min(1.0, hsl.l + 0.002); 
-            color.setHSL(hsl.h, hsl.s, hsl.l);
-        }
-
-        // 8. Animation Loop
+        
         function animate() {
             requestAnimationFrame(animate);
-            const elapsedTime = clock.getElapsedTime();
             const delta = clock.getDelta();
+            const elapsedTime = clock.getElapsedTime();
 
-            clickableObjects.forEach(obj => {
-                const tubeData = obj.userData;
-                if(tubeData.isRippleActive && tubeData.liquidMesh && tubeData.liquidMesh.material.uniforms) {
-                    const uniforms = tubeData.liquidMesh.material.uniforms;
-                    uniforms.u_time.value = elapsedTime;
-                    const rippleStartTime = uniforms.u_ripple_start_time.value;
-                    const rippleDuration = 2.5;
-                    
-                    if(elapsedTime - rippleStartTime > rippleDuration) {
-                        uniforms.u_ripple_active.value = 0.0;
-                        tubeData.isRippleActive = false;
-                        if (tubeData.reactionPending) {
-                            startPrecipitation(tubeData);
-                        }
-                    }
-                }
-            });
-
-            for (let i = drops.length - 1; i >= 0; i--) {
-                const drop = drops[i];
-                drop.position.y -= 0.1;
+            for (let i = activeDrops.length - 1; i >= 0; i--) {
+                const drop = activeDrops[i];
+                drop.position.y -= 8.0 * delta;
                 if (drop.position.y <= drop.userData.targetY) {
-                    triggerReaction(drop.userData.tubeData);
-                    scene.remove(drop);
-                    drops.splice(i, 1);
-                }
-            }
-            
-            for (let i = splashParticles.length - 1; i >= 0; i--) {
-                const splash = splashParticles[i];
-                splash.userData.life -= delta;
-                const positions = splash.geometry.attributes.position;
-                for (let j = 0; j < positions.count; j++) {
-                    positions.setX(j, positions.getX(j) + splash.userData.velocities[j*3] * delta);
-                    positions.setY(j, positions.getY(j) + splash.userData.velocities[j*3+1] * delta);
-                    positions.setZ(j, positions.getZ(j) + splash.userData.velocities[j*3+2] * delta);
-                }
-                positions.needsUpdate = true;
-                splash.material.opacity = splash.userData.life;
-                if (splash.userData.life <= 0) {
-                    scene.remove(splash);
-                    splashParticles.splice(i, 1);
+                    onDropImpact(drop.userData.tubeState);
+                    scene.remove(drop); activeDrops.splice(i, 1);
                 }
             }
 
             for (let i = sinkingParticles.length - 1; i >= 0; i--) {
-                const particle = sinkingParticles[i];
-                const tubeData = particle.userData.tubeData;
-                const tubeBottomY = tubeData.group.position.y - 0.45;
-
-                particle.userData.velocityY += 0.0001;
-                particle.position.y -= particle.userData.velocityY;
-
-                if (particle.position.y <= tubeBottomY + tubeData.precipitateHeight) {
-                    if (tubeData.precipitateMesh && (!tubeData.isRippleActive || tubeData.precipitateHeight > 0)) {
-                        tubeData.precipitateHeight += 0.005;
-                        const maxPrecipitateHeight = tubeData.originalLiquidHeight * 0.8;
-                        tubeData.precipitateHeight = Math.min(tubeData.precipitateHeight, maxPrecipitateHeight);
-
-                        const liquidRadius = 0.5 - 0.05;
-                        
-                        const newPrecipitateGeom = createLiquidGeometry(liquidRadius, tubeData.precipitateHeight, 0);
-                        tubeData.precipitateMesh.geometry.dispose();
-                        tubeData.precipitateMesh.geometry = newPrecipitateGeom;
-
-                        const newLiquidHeight = tubeData.originalLiquidHeight - tubeData.precipitateHeight;
-                        const newLiquidGeom = createLiquidGeometry(liquidRadius, newLiquidHeight, tubeData.precipitateHeight);
-                        tubeData.liquidMesh.geometry.dispose();
-                        tubeData.liquidMesh.geometry = newLiquidGeom;
-                        
-                        fadeLiquidColor(tubeData);
+                const particle = sinkingParticles[i]; particle.userData.velocityY += particle.userData.acceleration * delta; particle.position.y -= particle.userData.velocityY * delta;
+                const tubeState = particle.userData.tubeState; const precipitateSurface = tubeState.group.position.y + tubeState.precipitateHeight;
+                if (particle.position.y <= precipitateSurface) {
+                    particle.visible = false; particlePool.push(particle); sinkingParticles.splice(i, 1);
+                    if (tubeState.growthPending) {
+                        tubeState.growthPending = false;
+                        if (tubeState.id === 'copperSulfate' && selectedReagent === 'ammonia' && tubeState.dropCount > 5) {
+                            tubeState.isDissolving = true; tubeState.precipitateTargetHeight = 0;
+                        } else {
+                            if (!tubeState.precipitateMesh.material) {
+                                const precipitateColor = getReactionResult(tubeState.id, selectedReagent);
+                                tubeState.precipitateMesh.material = createPrecipitateMaterial(precipitateColor, tubeState.precipitateClipPlane);
+                                tubeState.precipitateCapMesh.material = new THREE.MeshPhysicalMaterial({ color: precipitateColor, roughness: 0.8 });
+                                tubeState.precipitateMesh.visible = true;
+                            }
+                            tubeState.precipitateTargetHeight += 0.3;
+                            tubeState.precipitateTargetHeight = Math.min(tubeState.precipitateTargetHeight, tubeState.originalLiquidHeight);
+                        }
                     }
-                    scene.remove(particle);
-                    sinkingParticles.splice(i, 1);
                 }
             }
             
+            clickableTubes.forEach(glassMesh => {
+                const tubeState = glassMesh.userData;
+                tubeState.liquidSurface.userData.shaderUniforms.uTime.value = elapsedTime;
+                const needsUpdate = (tubeState.precipitateMesh.visible || tubeState.isDissolving) && Math.abs(tubeState.precipitateHeight - tubeState.precipitateTargetHeight) > 0.001;
+                if (needsUpdate) {
+                    const direction = Math.sign(tubeState.precipitateTargetHeight - tubeState.precipitateHeight);
+                    const speed = (tubeState.isDissolving) ? 0.9 : 0.3;
+                    tubeState.precipitateHeight += direction * speed * delta;
+                    tubeState.precipitateClipPlane.constant = tubeState.precipitateHeight;
+                    tubeState.precipitateCapMesh.position.y = tubeState.precipitateHeight;
+                    const R = tubeState.liquidRadius; const h = tubeState.precipitateHeight; let capScale = 1.0;
+                    if (h < R) { const currentRadius = Math.sqrt(2 * R * h - h * h); capScale = isNaN(currentRadius) ? 0 : currentRadius / R; }
+                    tubeState.precipitateCapMesh.scale.set(capScale, 1.0, capScale);
+                    tubeState.precipitateCapMesh.visible = tubeState.precipitateHeight > 0.001;
+                    if (direction > 0) {
+                        const color = tubeState.liquidMesh.material.color; const hsl = {}; color.getHSL(hsl);
+                        hsl.s = Math.max(0.1, hsl.s * 0.99); color.setHSL(hsl.h, hsl.s, hsl.l);
+                        tubeState.liquidSurface.material.color.set(color);
+                    }
+                } else if (tubeState.isDissolving && !needsUpdate) {
+                    tubeState.isDissolving = false; tubeState.reactionComplete = true;
+                    tubeState.precipitateMesh.visible = false; tubeState.precipitateCapMesh.visible = false;
+                    tubeState.liquidMesh.material.color.set(0x483D8B);
+                    tubeState.liquidSurface.material.color.set(0x483D8B);
+                }
+            });
+
             controls.update();
             renderer.render(scene, camera);
         }
+        
+        startButton.addEventListener('click', () => {
+            const controlsDiv = document.getElementById('controls');
+            const instructionsDiv = document.getElementById('instructions');
+            document.getElementById('start-screen').style.display = 'none';
+            controlsDiv.style.visibility = 'visible';
+            
+            // MUUTOS: Näytä ja piilota ohjeteksti
+            instructionsDiv.style.visibility = 'visible';
+            instructionsDiv.style.opacity = '1';
+            setTimeout(() => {
+                instructionsDiv.style.opacity = '0';
+                setTimeout(() => { instructionsDiv.style.visibility = 'hidden'; }, 500); // Piilota kun häivytys on valmis
+            }, 10000); // Teksti näkyvissä 10 sekuntia
 
+            initializeSimulation(); 
+            animate();
+        });
+        
+        document.getElementById('reagent-select').addEventListener('change', (e) => { selectedReagent = e.target.value; });
+        document.getElementById('reset-button').addEventListener('click', resetSimulation);
         window.addEventListener('resize', () => {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
-
-        animate();
     </script>
 </body>
 </html>
