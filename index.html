@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js - Koeputket - Hienosäädetty vesiefekti</title>
+    <title>Three.js - Koeputket - Parannellut Reaktiot</title>
     <style>
         body { margin: 0; background-color: #333; overflow: hidden; font-family: sans-serif; }
         canvas { display: block; }
@@ -18,7 +18,6 @@
         #start-button { font-size: 2em; padding: 20px 40px; cursor: pointer; border: none; border-radius: 10px; }
         #start-button:disabled { cursor: wait; background-color: #555; color: #aaa; }
         
-        /* UUSI OHJETEKSTI */
         #instructions {
             position: absolute;
             top: 20px;
@@ -72,7 +71,7 @@
         const scene = new THREE.Scene();
         const clock = new THREE.Clock();
         const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 2.5, 12); // Siirretään kameraa hieman taaemmas
+        camera.position.set(0, 2.5, 12);
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
@@ -86,10 +85,7 @@
         new RGBELoader().load('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_03_1k.hdr', (texture) => {
             texture.mapping = THREE.EquirectangularReflectionMapping;
             scene.environment = texture;
-            
-            // UUSI: Esiladataan shaderit ennen kuin aloitetaan
             preloadShaders();
-
             startButton.disabled = false;
             startButton.textContent = 'Aloita simulaatio';
         });
@@ -105,6 +101,34 @@
         let selectedReagent = 'ammonia';
         const particlePool = [];
         const MAX_PARTICLES = 200; 
+
+        // UUSI: Globaali reaktiomäärittely
+        const REACTIONS = {
+            copperSulfate: {
+                naoh: { type: 'precipitate', color: 0x55E0C0 }, // Vaaleansininen
+                ammonia: { type: 'precipitate', color: 0x55E0C0 }, // Vaaleansininen (liukenee)
+                ki: { type: 'solution', color: 0x8B4513 } // Ruskea feidaus (I2)
+            },
+            ironIISulfate: {
+                naoh: { type: 'precipitate', color: 0x8FBC8F }, // Likaisenvihreä
+                ammonia: { type: 'precipitate', color: 0x8FBC8F } // Likaisenvihreä
+            },
+            ironIIISulfate: {
+                naoh: { type: 'precipitate', color: 0xA0522D }, // Punaruskea
+                ammonia: { type: 'precipitate', color: 0xA0522D }, // Punaruskea
+                ki: { type: 'solution', color: 0x8B4513 } // Tummanruskea (I2)
+            },
+            leadNitrate: {
+                naoh: { type: 'precipitate', color: 0xf0f0f0 }, // Valkoinen (liukenee)
+                ammonia: { type: 'precipitate', color: 0xf0f0f0 }, // Valkoinen
+                ki: { type: 'precipitate', color: 0xFFEB00 } // Kirkkaankeltainen
+            },
+            silverNitrate: {
+                naoh: { type: 'precipitate', color: 0x8B4513 }, // Ruskea (Ag2O)
+                ammonia: { type: 'precipitate', color: 0x8B4513 }, // Ruskea (liukenee)
+                ki: { type: 'precipitate', color: 0xF5DEB3 } // Haaleankeltainen (AgI)
+            }
+        };
 
         function createTubeGeometry(radius, height, openEnded = false) {
             const cylinderHeight = height - radius;
@@ -193,25 +217,21 @@
             glassMesh.userData = { 
                 id, group, liquidMesh: liquidBodyMesh, liquidSurface: liquidSurfaceMesh, precipitateMesh, precipitateCapMesh, precipitateClipPlane, dropCount: 0, originalColor: liquidColor, 
                 originalLiquidHeight: LIQUID_HEIGHT, precipitateHeight: 0, liquidRadius: LIQUID_RADIUS, 
-                reactionComplete: false, isDissolving: false, precipitateTargetHeight: 0, growthPending: false 
+                reactionComplete: false, isDissolving: false, precipitateTargetHeight: 0, growthPending: false,
+                // UUDET TILAT FEIDAUSTA VARTEN
+                isFading: false, 
+                fadeTargetColor: null 
             };
             clickableTubes.push(glassMesh);
             return group;
         }
 
-        // MUUTOS: Lisätty hopeanitraatin reaktiot
+        // MUUTOS: Käyttää globaalia REACTIONS-karttaa
         function getReactionResult(tubeId, reagent) {
-            const reactions = {
-                copperSulfate: { naoh: 0x55E0C0, ammonia: 0x55E0C0 },
-                ironIISulfate: { naoh: 0x8FBC8F, ammonia: 0x8FBC8F },
-                ironIIISulfate: { naoh: 0xA0522D, ammonia: 0xA0522D },
-                leadNitrate: { naoh: 0xf0f0f0, ammonia: 0xf0f0f0, ki: 0xFFEB00 },
-                silverNitrate: { naoh: 0x8B4513, ki: 0xFFFF00 } // Ruskea ja keltainen
-            };
-            return reactions[tubeId]?.[reagent] || null;
+            return REACTIONS[tubeId]?.[reagent] || null;
         }
 
-        // UUSI FUNKTIO: Shaderien esilataus suorituskyvyn parantamiseksi
+        // MUUTOS: Lukee reaktiot globaalista REACTIONS-kartasta
         function preloadShaders() {
             console.log("Pre-compiling shaders...");
             const dummyScene = new THREE.Scene();
@@ -219,17 +239,17 @@
             const dummyPlane = new THREE.Plane();
             
             const uniqueColors = new Set();
-            const reactions = { // Otetaan kaikki mahdolliset reaktiot
-                copperSulfate: { naoh: 0x55E0C0, ammonia: 0x55E0C0 }, ironIISulfate: { naoh: 0x8FBC8F, ammonia: 0x8FBC8F },
-                ironIIISulfate: { naoh: 0xA0522D, ammonia: 0xA0522D }, leadNitrate: { naoh: 0xf0f0f0, ammonia: 0xf0f0f0, ki: 0xFFD700 },
-                silverNitrate: { naoh: 0x4B3621, ki: 0xF5DEB3 }
-            };
 
-            for (const tube in reactions) {
-                for (const reagent in reactions[tube]) {
-                    uniqueColors.add(reactions[tube][reagent]);
+            for (const tube in REACTIONS) {
+                for (const reagent in REACTIONS[tube]) {
+                    const result = REACTIONS[tube][reagent];
+                    if (result.type === 'precipitate') { // Esiladataan vain sakkojen shaderit
+                        uniqueColors.add(result.color);
+                    }
                 }
             }
+            // Lisätään kuparikompleksin väri manuaalisesti
+            uniqueColors.add(0x483D8B); 
 
             uniqueColors.forEach(color => {
                 const mat = createPrecipitateMaterial(color, dummyPlane);
@@ -242,14 +262,20 @@
         }
         
         function initializeSimulation() {
-            // MUUTOS: Lisätty hopeanitraatti
             const tubeDefs = [
-                { id: 'copperSulfate', color: 0x6495ED },
-                { id: 'ironIISulfate', color: 0x98FB98 },
-                { id: 'leadNitrate', color: 0xffffff },
-                { id: 'ironIIISulfate', color: 0xD2B48C },
-                { id: 'silverNitrate', color: 0xffffff }
+                { id: 'copperSulfate', color: 0x6495ED },  // Kupari (sininen)
+                { id: 'ironIISulfate', color: 0x98FB98 },  // Rauta II (vaaleanvihreä)
+                { id: 'leadNitrate', color: 0xffffff },    // Lyijy (väritön)
+                { id: 'ironIIISulfate', color: 0xD2B48C }, // Rauta III (kellertävänruskea)
+                { id: 'silverNitrate', color: 0xffffff }   // Hopea (väritön)
             ];
+            
+            // Sekoitetaan järjestys
+            for (let i = tubeDefs.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [tubeDefs[i], tubeDefs[j]] = [tubeDefs[j], tubeDefs[i]];
+            }
+
             tubeDefs.forEach((def, i) => {
                 const xPos = (i - (tubeDefs.length - 1) / 2) * 1.8;
                 scene.add(createTestTube(new THREE.Vector3(xPos, 0, 0), def.id, def.color));
@@ -273,10 +299,15 @@
                 tubeState.liquidSurface.userData.shaderUniforms.uDropTime.value = -1000;
                 tubeState.dropCount = 0; tubeState.reactionComplete = false;
                 tubeState.isDissolving = false; tubeState.growthPending = false;
+                
+                // UUSI: Nollataan feidaus-tilat
+                tubeState.isFading = false; 
+                tubeState.fadeTargetColor = null;
             });
             sinkingParticles.forEach(p => { p.visible = false; particlePool.push(p); });
             sinkingParticles = [];
             activeDrops.forEach(d => scene.remove(d)); activeDrops = [];
+            // Huom: Ei poisteta tai luoda putkia uudelleen, jotta sijainnit eivät vaihdu resetissä
         }
 
         function addDrop(tubeState) {
@@ -295,13 +326,26 @@
             uniforms.uDropCenter.value.set(0.5 + (Math.random() - 0.5) * 0.3, 0.5 + (Math.random() - 0.5) * 0.3);
         }
 
+        // MUUTOS: Käsittelee erilaisia reaktiotyyppejä
         function triggerReaction(tubeState) {
-            if (tubeState.reactionComplete) return;
+            if (tubeState.reactionComplete && !tubeState.growthPending) return; // Älä reagoi, jos feidaus kesken tai valmis
             tubeState.dropCount++;
-            const precipitateColor = getReactionResult(tubeState.id, selectedReagent);
-            if (precipitateColor) {
-                tubeState.growthPending = true;
-                for(let i=0; i < 10; i++) activateSinkingParticle(tubeState, precipitateColor);
+            
+            const result = getReactionResult(tubeState.id, selectedReagent);
+            
+            if (result) {
+                if (result.type === 'precipitate') {
+                    // Estä uusien partikkelien synty, jos liukeneminen on jo alkanut
+                    if (tubeState.isDissolving) return; 
+                    
+                    tubeState.growthPending = true;
+                    for(let i=0; i < 10; i++) activateSinkingParticle(tubeState, result.color);
+                } 
+                else if (result.type === 'solution') {
+                    tubeState.isFading = true;
+                    tubeState.fadeTargetColor = new THREE.Color(result.color);
+                    tubeState.reactionComplete = true; // Merkitään reaktio valmiiksi (ei enää tippoja)
+                }
             }
         }
         
@@ -341,19 +385,33 @@
                 const tubeState = particle.userData.tubeState; const precipitateSurface = tubeState.group.position.y + tubeState.precipitateHeight;
                 if (particle.position.y <= precipitateSurface) {
                     particle.visible = false; particlePool.push(particle); sinkingParticles.splice(i, 1);
+                    
                     if (tubeState.growthPending) {
                         tubeState.growthPending = false;
-                        if (tubeState.id === 'copperSulfate' && selectedReagent === 'ammonia' && tubeState.dropCount > 5) {
-                            tubeState.isDissolving = true; tubeState.precipitateTargetHeight = 0;
+                        
+                        // --- MUUTOS: Laajennettu tarkistamaan kaikki liukenevat reaktiot ---
+                        const dropThreshold = 5;
+                        const isCopperComplex = (tubeState.id === 'copperSulfate' && selectedReagent === 'ammonia' && tubeState.dropCount > dropThreshold);
+                        const isLeadComplex = (tubeState.id === 'leadNitrate' && selectedReagent === 'naoh' && tubeState.dropCount > dropThreshold);
+                        const isSilverComplex = (tubeState.id === 'silverNitrate' && selectedReagent === 'ammonia' && tubeState.dropCount > dropThreshold);
+
+                        if (isCopperComplex || isLeadComplex || isSilverComplex) {
+                            tubeState.isDissolving = true; 
+                            tubeState.precipitateTargetHeight = 0;
                         } else {
                             if (!tubeState.precipitateMesh.material) {
-                                const precipitateColor = getReactionResult(tubeState.id, selectedReagent);
-                                tubeState.precipitateMesh.material = createPrecipitateMaterial(precipitateColor, tubeState.precipitateClipPlane);
-                                tubeState.precipitateCapMesh.material = new THREE.MeshPhysicalMaterial({ color: precipitateColor, roughness: 0.8 });
-                                tubeState.precipitateMesh.visible = true;
+                                const result = getReactionResult(tubeState.id, selectedReagent);
+                                if (result && result.type === 'precipitate') {
+                                    const precipitateColor = result.color;
+                                    tubeState.precipitateMesh.material = createPrecipitateMaterial(precipitateColor, tubeState.precipitateClipPlane);
+                                    tubeState.precipitateCapMesh.material = new THREE.MeshPhysicalMaterial({ color: precipitateColor, roughness: 0.8 });
+                                    tubeState.precipitateMesh.visible = true;
+                                }
                             }
-                            tubeState.precipitateTargetHeight += 0.3;
-                            tubeState.precipitateTargetHeight = Math.min(tubeState.precipitateTargetHeight, tubeState.originalLiquidHeight);
+                            if(tubeState.precipitateMesh.material) { // Varmistus, että materiaali on olemassa
+                                tubeState.precipitateTargetHeight += 0.3;
+                                tubeState.precipitateTargetHeight = Math.min(tubeState.precipitateTargetHeight, tubeState.originalLiquidHeight);
+                            }
                         }
                     }
                 }
@@ -362,6 +420,27 @@
             clickableTubes.forEach(glassMesh => {
                 const tubeState = glassMesh.userData;
                 tubeState.liquidSurface.userData.shaderUniforms.uTime.value = elapsedTime;
+
+                // --- UUSI: LIUOKSEN VÄRIN FEIDAUS ---
+                if (tubeState.isFading && tubeState.fadeTargetColor) {
+                    const fadeSpeed = 0.05; // Hitaampi, pehmeämpi feidaus
+                    tubeState.liquidMesh.material.color.lerp(tubeState.fadeTargetColor, fadeSpeed);
+                    tubeState.liquidSurface.material.color.lerp(tubeState.fadeTargetColor, fadeSpeed);
+                    
+                    // Tarkistetaan, onko väri riittävän lähellä kohdetta (RGB-etäisyys)
+                    const current = tubeState.liquidMesh.material.color;
+                    const target = tubeState.fadeTargetColor;
+                    const dr = current.r - target.r, dg = current.g - target.g, db = current.b - target.b;
+                    if ((dr*dr + dg*dg + db*db) < 1e-6) {
+                        tubeState.isFading = false;
+                        // Asetetaan tarkka loppuväri
+                        tubeState.liquidMesh.material.color.copy(target);
+                        tubeState.liquidSurface.material.color.copy(target);
+                        tubeState.fadeTargetColor = null;
+                    }
+                }
+
+                // --- SAKAN KASVU/LIUKENEMISANIMAATIO ---
                 const needsUpdate = (tubeState.precipitateMesh.visible || tubeState.isDissolving) && Math.abs(tubeState.precipitateHeight - tubeState.precipitateTargetHeight) > 0.001;
                 if (needsUpdate) {
                     const direction = Math.sign(tubeState.precipitateTargetHeight - tubeState.precipitateHeight);
@@ -378,11 +457,24 @@
                         hsl.s = Math.max(0.1, hsl.s * 0.99); color.setHSL(hsl.h, hsl.s, hsl.l);
                         tubeState.liquidSurface.material.color.set(color);
                     }
-                } else if (tubeState.isDissolving && !needsUpdate) {
+                } 
+                // --- MUUTOS: Käsittelee eri kompleksien loppuvärit ---
+                else if (tubeState.isDissolving && !needsUpdate) {
                     tubeState.isDissolving = false; tubeState.reactionComplete = true;
                     tubeState.precipitateMesh.visible = false; tubeState.precipitateCapMesh.visible = false;
-                    tubeState.liquidMesh.material.color.set(0x483D8B);
-                    tubeState.liquidSurface.material.color.set(0x483D8B);
+                    
+                    let finalColor;
+                    if (tubeState.id === 'copperSulfate' && selectedReagent === 'ammonia') {
+                        finalColor = 0x483D8B; // Tummansininen kuparikompleksi
+                    } else if ((tubeState.id === 'leadNitrate' && selectedReagent === 'naoh') ||
+                               (tubeState.id === 'silverNitrate' && selectedReagent === 'ammonia')) {
+                        finalColor = tubeState.originalColor; // Värittömät kompleksit (paluu alkuperäiseen)
+                    }
+
+                    if (finalColor !== undefined) {
+                        tubeState.liquidMesh.material.color.set(finalColor);
+                        tubeState.liquidSurface.material.color.set(finalColor);
+                    }
                 }
             });
 
@@ -396,13 +488,12 @@
             document.getElementById('start-screen').style.display = 'none';
             controlsDiv.style.visibility = 'visible';
             
-            // MUUTOS: Näytä ja piilota ohjeteksti
             instructionsDiv.style.visibility = 'visible';
             instructionsDiv.style.opacity = '1';
             setTimeout(() => {
                 instructionsDiv.style.opacity = '0';
-                setTimeout(() => { instructionsDiv.style.visibility = 'hidden'; }, 500); // Piilota kun häivytys on valmis
-            }, 10000); // Teksti näkyvissä 10 sekuntia
+                setTimeout(() => { instructionsDiv.style.visibility = 'hidden'; }, 500);
+            }, 10000);
 
             initializeSimulation(); 
             animate();
