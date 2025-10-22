@@ -262,19 +262,14 @@
         }
         
         function initializeSimulation() {
+            // Kiinteä järjestys: hopea, kupari, lyijy, rauta3+, rauta2+
             const tubeDefs = [
+                { id: 'silverNitrate', color: 0xffffff },  // Hopea (väritön)
                 { id: 'copperSulfate', color: 0x6495ED },  // Kupari (sininen)
-                { id: 'ironIISulfate', color: 0x98FB98 },  // Rauta II (vaaleanvihreä)
                 { id: 'leadNitrate', color: 0xffffff },    // Lyijy (väritön)
                 { id: 'ironIIISulfate', color: 0xD2B48C }, // Rauta III (kellertävänruskea)
-                { id: 'silverNitrate', color: 0xffffff }   // Hopea (väritön)
+                { id: 'ironIISulfate', color: 0x98FB98 }   // Rauta II (vaaleanvihreä)
             ];
-            
-            // Sekoitetaan järjestys
-            for (let i = tubeDefs.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [tubeDefs[i], tubeDefs[j]] = [tubeDefs[j], tubeDefs[i]];
-            }
 
             tubeDefs.forEach((def, i) => {
                 const xPos = (i - (tubeDefs.length - 1) / 2) * 1.8;
